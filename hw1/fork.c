@@ -92,6 +92,8 @@ int main(int argc, char* argv[])
 	if(p == NULL)
 	{
 		fprintf(stderr, "server: bind failed...\n");
+		close(fd_server);
+		freeaddrinfo(servinfo);
 		exit(1);
 	}
 
