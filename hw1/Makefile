@@ -9,5 +9,5 @@ select.o: select.c
 	gcc -Wall -g -c  select.c
 
 clean:
-	rm fork.o select.o
+	rm fork.o select.o fork select
 
