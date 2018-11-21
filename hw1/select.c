@@ -172,7 +172,7 @@ int main(int argc, char* argv[])
 					{
 						int recv_len;
 						//memset(buf, 0, MAXBUF);
-            if((recv_len = recv(i, buf, sizeof(buf), 0) <= 0))
+						if((recv_len = recv(i, buf, sizeof(buf), 0) <= 0))
 						{
 							if(recv_len == 0)
 								printf("server: socket %d hung up\n", i);
@@ -186,7 +186,7 @@ int main(int argc, char* argv[])
 
  
 						//send(i, buf, recv_len, 0);
-            }
+						}
 					}
 				}
 			}
