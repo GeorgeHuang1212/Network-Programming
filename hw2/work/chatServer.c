@@ -59,8 +59,8 @@ void *chatroom(void *index) {
             write(tofd, readbuf, sizeof(readbuf));
         }
         else if (!strncmp(readbuf, "--dm", 4)) {
-            char *message = strchr(readbuf, ' ') + 1;
-            char *to = strchr(readbuf, '/') + 1;
+            char *message = strrchr(readbuf, ' ') + 1;
+            char *to = strchr(readbuf, ' ') + 1;
             to[strchr(to, ' ') - to] = '\0';
             sprintf(writebuf, "[To you]%s: %s\n", name[i], message);
             for (int j = 0; j < n; ++j)

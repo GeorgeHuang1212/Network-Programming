@@ -12,7 +12,11 @@
 #include <pthread.h>
 
 #define BUFFER 500
-#define BACKLOG 10
+#define MAXCLI 10
+#define USERNAMESIZE 20
+
+int fd_client[MAXCLI], thread_n = 0;
+struct sockaddr_storage client_addr[MAXCLI];
 
 void* get_in_addr(struct sockaddr* sa)
 {
@@ -42,7 +46,8 @@ void startServer(int socket_fd, struct addrinfo* info)
 		perror("server: bind");
 		myexit(socket_fd, info);
 	}	
-	if( listen(socket_fd, BACKLOG) == -1)
+	printf("bind succes\n");
+	if( listen(socket_fd, MAXCLI) == -1)
 	{
 		perror("listen");
 		myexit(socket_fd, info);
@@ -52,46 +57,96 @@ void startServer(int socket_fd, struct addrinfo* info)
 	return;
 }
 
-void* receive(void* socket)
+void* chatroom(void* i)
 {
-	int response;
-	intptr_t socket_fd;
-	char message[BUFFER];
-	memset(message, 0, BUFFER);
+	int index = *(int*) i;
+	char userName[MAXCLI][USERNAMESIZE];
+	char readbuf[BUFFER], writebuf[BUFFER];
 
-	socket_fd = (intptr_t) socket;
+	memset(userName, 0, sizeof(userName));
 
+	read(fd_client[index], userName[index], USERNAMESIZE);
+	
 	while(true)
 	{
-		response = recvfrom(socket_fd, message, BUFFER, 0, NULL, NULL);
-		if(response)
-		{
-			printf("%s", message);
-		}
-	}
-}
+		memset(readbuf, 0, BUFFER);
+		read(fd_client[index], readbuf, BUFFER);
 
-void send_message(int socket_fd, struct sockaddr_storage* address, socklen_t address_size)
-{
-	char message[BUFFER];
-	while( fgets(message, BUFFER, stdin) != NULL)
-	{
-		if( strncmp(message, "/quit", 5) == 0)
+		if( strncmp(readbuf, "--quit", 6) == 0)
 		{
-			printf("Closing connection...\n");
-			exit(EXIT_SUCCESS);
+			fd_client[index] = 0;
+			pthread_exit(NULL);
+		}	
+		else if( strncmp(readbuf, "--who", 5) == 0)
+		{
+			for( int j = 0; j < thread_n; j++)
+			{
+				if( fd_client[j] == true)
+				{
+					strcat(writebuf, userName[j]);
+					strcat(writebuf, "\n");
+				}
+			}
+			write(fd_client[index], writebuf, BUFFER);
 		}
-		sendto(socket_fd, message, BUFFER, 0, (struct sockaddr*) address, address_size); 
+		else if( strncmp(readbuf, "--dm", 4) == 0)
+		{
+			char* message = strrchr(readbuf, ' ') + 1;
+			char* to = strchr(readbuf, ' ') + 1;
+			to[strchr(to, ' ') - to] = '\0';
+
+			sprintf(writebuf, "[For you]%s: %s\n", userName[index], message);
+			for( int j = 0; j < thread_n; j++)
+			{
+				if( strcmp(userName[j], to) == 0 && fd_client[j] == true)
+				{
+					write(fd_client[j], writebuf, sizeof(writebuf));
+					break;
+				}
+			}
+		}
+		else if( strncmp(readbuf, "--send", 6))
+		{
+			char* filename = strrchr(readbuf, ' ') + 1;
+			char* to = strchr(readbuf, ' ') + 1;
+			to[strchr(to, ' ') - to] = '\0';
+			int receive_fd;
+
+			sprintf(writebuf, "[From %s]%s\n", userName[index], filename);
+			for( int j = 0; j < thread_n; j++)
+			{
+				if( strcmp(userName[j], to) == 0 && fd_client[j] == true)
+				{
+					write(fd_client[j], writebuf, sizeof(writebuf));
+					receive_fd = fd_client[j];
+					break;
+				}
+			}
+			read(fd_client[index], readbuf, BUFFER);
+			write(receive_fd, readbuf, BUFFER);
+		}
+		else
+		{
+			sprintf(writebuf, "%s: %s\n", userName[index], readbuf);
+			for( int j = 0; j < thread_n; j++)
+			{
+				if( fd_client[j] == true)
+				{
+					write(fd_client[j], writebuf, BUFFER);
+				}
+			}
+		}
 	}
+
 }
 
 int main(int argc, char** argv)
 {
 	struct addrinfo hints, *servInfo;
-	struct sockaddr_storage client_addr;
 	int status, fd_server;
-	intptr_t fd_client;
+	intptr_t now_thread;
 	char addrstr[INET6_ADDRSTRLEN];
+	char ipstr[INET6_ADDRSTRLEN];
 	socklen_t client_addr_size;
 	pthread_t thread;
 
@@ -111,29 +166,45 @@ int main(int argc, char** argv)
 		fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
 		exit(EXIT_FAILURE);
 	}
+
+	void* addr;
+	struct sockaddr_in *ipv4 = (struct sockaddr_in*) servInfo->ai_addr;
+	addr = &(ipv4->sin_addr);
+	inet_ntop(servInfo->ai_family, addr, ipstr, INET6_ADDRSTRLEN);
+	printf("address = %s\n", ipstr);
+
 	if((fd_server = socket(servInfo->ai_family, servInfo->ai_socktype, servInfo->ai_protocol)) == -1)
 	{
 		perror("server: socket");
 		exit(EXIT_FAILURE);
 	}
+	printf("socket succes\n");
 
 	startServer(fd_server, servInfo);
 
-	client_addr_size = sizeof(struct sockaddr_storage);
-	if((fd_client = accept(fd_server, (struct sockaddr*) &client_addr, &client_addr_size)) == -1)
+	now_thread = 0;
+	while(true)
 	{
-		perror("accept");
-		myexit(fd_server, NULL);
-	}	
+		client_addr_size = sizeof(struct sockaddr_storage);
+		if((fd_client[thread_n] = accept(fd_server, (struct sockaddr*) &client_addr[thread_n], &client_addr_size)) == -1)
+		{
+			perror("accept");
+			myexit(fd_server, NULL);
+		}	
+	
+		inet_ntop(client_addr[thread_n].ss_family, get_in_addr((struct sockaddr*) &client_addr[thread_n]), addrstr, sizeof(addrstr));
+		printf("server: got connection from %s\n", addrstr);
 
-	inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr*) &client_addr), addrstr, sizeof(addrstr));
-	printf("server: got connection from %s\n", addrstr);
+		now_thread = thread_n;
+		thread_n++;
+	
+		pthread_create(&thread, NULL, chatroom, &now_thread);
+	}
 
-	pthread_create(&thread, NULL, receive, (void*) fd_client);
-
-	send_message(fd_client, &client_addr, client_addr_size);
-
-	close(fd_client);
+	for( int i = 0; i < thread_n; i++)
+	{
+		close(fd_client[i]);
+	}
 	close(fd_server);
 	pthread_exit(NULL);
 
